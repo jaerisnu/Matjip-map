@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover,interactive-widget=resizes-content">
+<meta name="theme-color" content="#ffffff">
+<title>맛집 지도</title>
+<style>
+  :root{
+    --bg:#ffffff; --ink:#1c1b1a; --sub:#6f6a64; --line:#e7e2db;
+    --accent:#e4572e; --accent-ink:#ffffff; --star:#f2a900; --soft:#f6f3ee; --me:#1a73e8;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font-family:"Pretendard","Noto Sans KR",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  #map{position:fixed;inset:0;height:100dvh;width:100vw;background:#eceae6}
+  button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+
+  /* 상단 바 */
+  .top{position:fixed;z-index:1000;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top));
+    display:flex;gap:8px;align-items:center;pointer-events:none}
+  .chip{pointer-events:auto;background:var(--bg);border-radius:999px;padding:10px 16px;
+    box-shadow:0 2px 10px rgba(0,0,0,.16);font-size:14px;font-weight:600;min-height:46px;
+    display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .chip .n{color:var(--accent)}
+  .search{flex:1;min-width:0;margin:0}
+  .search input{flex:1;min-width:0;border:0;outline:0;background:none;font:inherit;font-size:16px;
+    font-weight:500;color:var(--ink);padding:0;margin:0;-webkit-appearance:none}
+
+  /* 검색 결과 */
+  .results{position:fixed;z-index:1001;left:12px;right:12px;top:calc(66px + env(safe-area-inset-top));
+    background:var(--bg);border-radius:14px;box-shadow:0 4px 18px rgba(0,0,0,.2);
+    max-height:50dvh;overflow-y:auto;display:none;padding:4px 14px}
+  .results.show{display:block}
+
+  /* 우하단 버튼 */
+  .fabs{position:fixed;z-index:1000;right:12px;bottom:calc(24px + env(safe-area-inset-bottom));
+    display:flex;flex-direction:column;gap:10px}
+  .fab{width:52px;height:52px;border-radius:50%;background:var(--bg);
+    box-shadow:0 2px 10px rgba(0,0,0,.22);font-size:22px;display:flex;align-items:center;justify-content:center}
+  .fab.rec{font-size:11px;font-weight:700;flex-direction:column;gap:1px;color:var(--sub)}
+  .fab.rec i{width:14px;height:14px;border-radius:50%;background:#d93025;display:block}
+  .fab.rec.on{background:#d93025;color:#fff}
+  .fab.rec.on i{background:#fff;border-radius:3px}
+
+  .hint{position:fixed;z-index:1200;left:50%;transform:translateX(-50%);
+    bottom:calc(28px + env(safe-area-inset-bottom));background:rgba(28,27,26,.88);color:#fff;
+    padding:9px 14px;border-radius:999px;font-size:13px;max-width:calc(100vw - 150px);text-align:center;
+    pointer-events:none;transition:opacity .3s}
+  .hint.hide{opacity:0}
+
+  /* 내 핀 */
+  .pin{width:34px;height:34px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);
+    background:var(--accent);border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35);
+    display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .pin span{transform:rotate(45deg);color:#fff;font-weight:700;font-size:13px}
+  .pin.temp{background:#1c1b1a}
+
+  /* 주변 가게 표시 */
+  .poi{display:flex;flex-direction:column;align-items:center;cursor:pointer;transform:translateY(50%)}
+  .poi b{width:22px;height:22px;border-radius:50%;background:#fff;border:2px solid var(--accent);
+    font-size:11px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+  .poi em{font-style:normal;font-size:11px;font-weight:700;color:#7a2c12;max-width:110px;margin-top:1px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    text-shadow:0 0 2px #fff,0 0 2px #fff,0 0 3px #fff,0 0 3px #fff}
+
+  /* 현위치 점 */
+  .me{width:18px;height:18px;border-radius:50%;background:var(--me);border:3px solid #fff;
+    box-shadow:0 0 0 6px rgba(26,115,232,.2),0 1px 4px rgba(0,0,0,.4);transform:translateY(50%)}
+
+  /* 바텀시트 */
+  .sheet{position:fixed;z-index:1100;left:0;right:0;bottom:0;background:var(--bg);
+    border-radius:18px 18px 0 0;box-shadow:0 -4px 24px rgba(0,0,0,.2);
+    padding:10px 16px calc(16px + env(safe-area-inset-bottom));
+    transform:translateY(105%);transition:transform .22s ease;max-height:80dvh;
+    display:flex;flex-direction:column}
+  .sheet.open{transform:none}
+  .grab{width:40px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 12px;flex:none}
+  .sheet h2{margin:0 0 12px;font-size:17px;flex:none}
+  .sheet h3{margin:16px 0 4px;font-size:13px;color:var(--sub)}
+  label{display:block;font-size:12px;color:var(--sub);margin:0 0 6px;font-weight:600}
+  input[type=text],textarea{width:100%;font:inherit;font-size:16px;color:var(--ink);
+    border:1.5px solid var(--line);border-radius:12px;padding:12px;background:var(--bg);
+    outline:none;margin-bottom:14px}
+  input[type=text]:focus,textarea:focus{border-color:var(--accent)}
+  textarea{resize:none;height:72px}
+  .stars{display:flex;gap:4px;margin-bottom:16px}
+  .stars button{font-size:34px;line-height:1;color:var(--line);width:48px;height:48px}
+  .stars button.on{color:var(--star)}
+  .row{display:flex;gap:8px}
+  .btn{flex:1;min-height:50px;border-radius:12px;font-weight:700;font-size:15px;background:var(--soft)}
+  .btn.primary{background:var(--accent);color:var(--accent-ink);flex:2}
+  .btn.danger{color:#c62828;flex:none;padding:0 16px}
+
+  /* 목록 */
+  #listBody{overflow-y:auto;margin:0 -16px;padding:0 16px}
+  .item{display:block;width:100%;text-align:left;padding:12px 0;border-bottom:1px solid var(--line)}
+  .item:last-child{border-bottom:0}
+  .item .nm{font-weight:700;font-size:15px}
+  .item .st{color:var(--star);font-size:13px;margin-left:6px;letter-spacing:1px}
+  .item .mm{color:var(--sub);font-size:13px;margin-top:3px;white-space:pre-wrap;word-break:break-word}
+  .trk{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+  .trk:last-child{border-bottom:0}
+  .trk .sw{width:22px;height:6px;border-radius:3px;flex:none}
+  .trk .tx{flex:1;text-align:left;font-size:14px;font-weight:600}
+  .trk .tx small{display:block;color:var(--sub);font-weight:400;font-size:12px;margin-top:2px}
+  .trk .del{color:#c62828;font-size:13px;font-weight:700;padding:8px}
+  .empty{color:var(--sub);font-size:14px;text-align:center;padding:20px 0}
+
+  /* API 키 입력 화면 */
+  .setup{position:fixed;inset:0;z-index:2000;background:var(--bg);padding:24px;
+    display:none;flex-direction:column;justify-content:center}
+  .setup.show{display:flex}
+  .setup h1{font-size:22px;margin:0 0 8px}
+  .setup p{color:var(--sub);font-size:14px;line-height:1.6;margin:0 0 18px}
+  .setup .btn{flex:none;width:100%}
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="top">
+  <form class="chip search" id="searchForm">
+    <span>🔍</span>
+    <input type="search" id="q" placeholder="식당·장소 검색" enterkeyhint="search" autocomplete="off">
+  </form>
+  <button class="chip" id="btnList">목록 <span class="n" id="count">0</span></button>
+</div>
+<div class="results" id="results"></div>
+
+<div class="fabs">
+  <button class="fab rec" id="btnRec" aria-label="이동 기록 시작/정지"><i></i><span id="recLabel">기록</span></button>
+  <button class="fab" id="btnLoc" aria-label="현위치">📍</button>
+</div>
+
+<div class="hint" id="hint">지도나 가게를 탭·길게 눌러 맛집 저장</div>
+
+<!-- API 키 입력 -->
+<div class="setup" id="setup">
+  <h1>Google Maps API 키</h1>
+  <p>Google Cloud 콘솔에서 <b>Maps JavaScript API</b>와 <b>Places API (New)</b>를 켠 키를 입력하세요.
+     키는 이 브라우저에만 저장되고 파일에는 남지 않습니다.</p>
+  <input type="text" id="fKey" placeholder="AIza..." autocomplete="off" autocapitalize="off" spellcheck="false">
+  <button class="btn primary" id="btnKeySave">시작</button>
+</div>
+
+<!-- 추가/수정 시트 -->
+<div class="sheet" id="editSheet">
+  <div class="grab"></div>
+  <h2 id="editTitle">맛집 저장</h2>
+  <label for="fName">가게 이름</label>
+  <input type="text" id="fName" maxlength="60" placeholder="예: 이치란 라멘" autocomplete="off">
+  <label for="fMemo">메모</label>
+  <textarea id="fMemo" maxlength="500" placeholder="추천 메뉴, 웨이팅, 가격 등"></textarea>
+  <label>별점</label>
+  <div class="stars" id="stars"></div>
+  <div class="row">
+    <button class="btn danger" id="btnDelete">삭제</button>
+    <button class="btn" id="btnCancel">취소</button>
+    <button class="btn primary" id="btnSave">저장</button>
+  </div>
+</div>
+
+<!-- 목록 시트 -->
+<div class="sheet" id="listSheet">
+  <div class="grab"></div>
+  <h2>저장한 맛집</h2>
+  <div id="listBody"></div>
+  <div class="row" style="margin-top:12px;flex:none">
+    <button class="btn" id="btnKey" style="flex:none;padding:0 16px">🔑 키 변경</button>
+    <button class="btn" id="btnListClose">닫기</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  var KEY='matjip.places.v1', VIEW='matjip.view.v1', APIKEY='matjip.gmaps.key', TRACKS='matjip.tracks.v1';
+  var COLORS=['#1a73e8','#d93025','#188038','#a142f4','#f29900','#12b5cb','#e52592','#5f6368'];
+  var $=function(id){return document.getElementById(id)};
+
+  function load(k,fb){try{var v=localStorage.getItem(k);return v?JSON.parse(v):fb}catch(e){return fb}}
+  function store(k,v){try{localStorage.setItem(k,JSON.stringify(v));return true}catch(e){return false}}
+
+  var places=load(KEY,[]);     // {id,lat,lng,name,memo,rating,created,placeId?}
+  var tracks=load(TRACKS,[]);  // {id,start,color,pts:[[lat,lng],...]}
+  var markers={}, lines={};
+  var editing=null, tempMarker=null, rating=3, map=null;
+
+  var hintTimer=null;
+  function toast(msg,ms){
+    var h=$('hint'); h.textContent=msg; h.classList.remove('hide');
+    clearTimeout(hintTimer); hintTimer=setTimeout(function(){h.classList.add('hide')},ms||3500);
+  }
+
+  function dist(a,b,c,d){ // m
+    var R=6371000,r=Math.PI/180,x=(c-a)*r,y=(d-b)*r;
+    var h=Math.sin(x/2)*Math.sin(x/2)+Math.cos(a*r)*Math.cos(c*r)*Math.sin(y/2)*Math.sin(y/2);
+    return 2*R*Math.asin(Math.sqrt(h));
+  }
+
+  /* ---------- API 키 / 로딩 ---------- */
+  function showSetup(){ $('fKey').value=load(APIKEY,'')||''; $('setup').classList.add('show'); }
+  $('btnKeySave').onclick=function(){
+    var k=$('fKey').value.trim(); if(!k){$('fKey').focus();return}
+    store(APIKEY,k); location.reload();
+  };
+  $('btnKey').onclick=showSetup;
+
+  window.gm_authFailure=function(){
+    alert('API 키 인증에 실패했습니다. 키와 사용 설정(Maps JavaScript API), 리퍼러 제한을 확인해 주세요.');
+    showSetup();
+  };
+
+  var apiKey=load(APIKEY,'');
+  if(!apiKey){ showSetup(); }
+  else{
+    window.__initMap=initMap;
+    var s=document.createElement('script');
+    s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(apiKey)+
+          '&v=weekly&libraries=marker,places&language=ko&loading=async&callback=__initMap';
+    s.async=true;
+    s.onerror=function(){alert('Google 지도를 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.')};
+    document.head.appendChild(s);
+  }
+
+  /* ---------- 지도 ---------- */
+  function pinEl(r,temp){
+    var d=document.createElement('div'); d.className='pin'+(temp?' temp':'');
+    var sp=document.createElement('span'); sp.textContent=temp?'+':r; d.appendChild(sp);
+    return d;
+  }
+
+  function addMarker(p){
+    var m=new google.maps.marker.AdvancedMarkerElement({
+      map:map,position:{lat:p.lat,lng:p.lng},content:pinEl(p.rating),gmpClickable:true,title:p.name,zIndex:10});
+    m.addListener('click',function(){openEdit(p.id)});
+    markers[p.id]=m;
+  }
+
+  function addLine(t){
+    lines[t.id]=new google.maps.Polyline({map:map,
+      path:t.pts.map(function(q){return {lat:q[0],lng:q[1]}}),
+      strokeColor:t.color,strokeWeight:5,strokeOpacity:.85,clickable:false});
+  }
+
+  function initMap(){
+    var view=load(VIEW,null);
+    map=new google.maps.Map($('map'),{
+      center:view?{lat:view.lat,lng:view.lng}:{lat:36.5,lng:133},
+      zoom:view?view.z:5,
+      mapId:'DEMO_MAP_ID',
+      disableDefaultUI:true,
+      gestureHandling:'greedy',
+      clickableIcons:true
+    });
+
+    var poiTimer=null;
+    map.addListener('idle',function(){
+      var c=map.getCenter(); store(VIEW,{lat:c.lat(),lng:c.lng(),z:map.getZoom()});
+      clearTimeout(poiTimer); poiTimer=setTimeout(loadPois,700);
+    });
+
+    map.addListener('click',function(e){
+      if(e.placeId){ e.stop(); }
+      if($('results').classList.contains('show')){ $('results').classList.remove('show'); return; }
+      openNew(e.latLng.lat(),e.latLng.lng(),e.placeId||null,null);
+    });
+    map.addListener('contextmenu',function(e){ openNew(e.latLng.lat(),e.latLng.lng(),null,null); });
+
+    // 길게 누르기 (모바일)
+    var lp=null;
+    function cancelLP(){ if(lp){clearTimeout(lp);lp=null} }
+    map.addListener('mousedown',function(e){
+      cancelLP(); var ll=e.latLng;
+      lp=setTimeout(function(){lp=null;openNew(ll.lat(),ll.lng(),null,null)},600);
+    });
+    ['mouseup','dragstart','zoom_changed'].forEach(function(ev){ map.addListener(ev,cancelLP); });
+
+    tracks.forEach(addLine);
+    places.forEach(addMarker);
+    if(!view && places.length){
+      var b=new google.maps.LatLngBounds();
+      places.forEach(function(p){b.extend({lat:p.lat,lng:p.lng})});
+      map.fitBounds(b,60);
+    }
+  }
+
+  function refreshCount(){ $('count').textContent=places.length; }
+
+  /* ---------- 주변 가게 표시 (줌 16 이상) ---------- */
+  var poiMarkers=[], lastPoi=null, placesErrShown=false;
+
+  function placesErr(){
+    if(placesErrShown)return; placesErrShown=true;
+    toast('가게 표시·검색이 안 되면 Places API (New) 사용 설정을 확인하세요',6000);
+  }
+  function clearPois(){ poiMarkers.forEach(function(m){m.map=null}); poiMarkers=[]; }
+
+  function poiEl(name){
+    var d=document.createElement('div'); d.className='poi';
+    var b=document.createElement('b'); b.textContent='🍴';
+    var em=document.createElement('em'); em.textContent=name;
+    d.appendChild(b); d.appendChild(em); return d;
+  }
+
+  function loadPois(){
+    if(!map)return;
+    if(map.getZoom()<16){ clearPois(); lastPoi=null; return; }
+    var c=map.getCenter(), b=map.getBounds(); if(!b)return;
+    var lat=c.lat(), lng=c.lng(), ne=b.getNorthEast();
+    var r=Math.max(50,Math.min(dist(lat,lng,ne.lat(),ne.lng()),1000));
+    // 조금 움직인 정도로는 다시 요청하지 않음 (API 호출 절약)
+    if(lastPoi && dist(lastPoi.lat,lastPoi.lng,lat,lng)<lastPoi.r*0.5 && r<lastPoi.r*1.5) return;
+    lastPoi={lat:lat,lng:lng,r:r};
+    google.maps.places.Place.searchNearby({
+      fields:['displayName','location'],
+      locationRestriction:{center:{lat:lat,lng:lng},radius:r},
+      includedTypes:['restaurant','cafe','bakery','bar'],
+      maxResultCount:20, language:'ko'
+    }).then(function(res){
+      clearPois();
+      var saved={}; places.forEach(function(p){ if(p.placeId) saved[p.placeId]=1; });
+      (res.places||[]).forEach(function(pl){
+        if(!pl.location||saved[pl.id])return;
+        var name=pl.displayName||'';
+        var m=new google.maps.marker.AdvancedMarkerElement({
+          map:map,position:pl.location,content:poiEl(name),gmpClickable:true,title:name,zIndex:1});
+        m.addListener('click',function(){ openNew(pl.location.lat(),pl.location.lng(),pl.id,name); });
+        poiMarkers.push(m);
+      });
+    }).catch(function(){ lastPoi=null; placesErr(); });
+  }
+
+  /* ---------- 검색 ---------- */
+  $('searchForm').addEventListener('submit',function(e){
+    e.preventDefault();
+    var q=$('q').value.trim(); if(!q||!map)return;
+    $('q').blur();
+    var box=$('results'); box.textContent='';
+    var ld=document.createElement('div'); ld.className='empty'; ld.textContent='검색 중…';
+    box.appendChild(ld); box.classList.add('show');
+    google.maps.places.Place.searchByText({
+      textQuery:q, fields:['displayName','location','formattedAddress'],
+      locationBias:map.getCenter(), maxResultCount:8, language:'ko'
+    }).then(function(res){
+      box.textContent='';
+      var list=(res.places||[]).filter(function(p){return p.location});
+      if(!list.length){ var e2=document.createElement('div'); e2.className='empty';
+        e2.textContent='검색 결과가 없어요.'; box.appendChild(e2); return; }
+      list.forEach(function(pl){
+        var b=document.createElement('button'); b.className='item';
+        var nm=document.createElement('span'); nm.className='nm'; nm.textContent=pl.displayName||'';
+        var mm=document.createElement('div'); mm.className='mm'; mm.textContent=pl.formattedAddress||'';
+        b.appendChild(nm); b.appendChild(mm);
+        b.onclick=function(){
+          box.classList.remove('show');
+          if(map.getZoom()<17) map.setZoom(17);
+          openNew(pl.location.lat(),pl.location.lng(),pl.id,pl.displayName||'');
+        };
+        box.appendChild(b);
+      });
+    }).catch(function(){ box.classList.remove('show'); placesErrShown=false; placesErr(); });
+  });
+
+  /* ---------- 현위치 ---------- */
+  var watchId=null, meMarker=null, lastPos=null, wantCenter=false;
+
+  function startWatch(){
+    if(watchId!==null)return true;
+    if(!navigator.geolocation){ toast('이 브라우저는 위치 기능을 지원하지 않아요'); return false; }
+    watchId=navigator.geolocation.watchPosition(onPos,function(err){
+      toast(err.code===1?'위치 권한이 거부됐어요. HTTPS 주소에서 열고 권한을 허용해 주세요'
+                        :'현재 위치를 가져오지 못했어요',5000);
+      if(err.code===1){ navigator.geolocation.clearWatch(watchId); watchId=null; }
+    },{enableHighAccuracy:true,maximumAge:5000,timeout:20000});
+    return true;
+  }
+
+  function onPos(pos){
+    var lat=pos.coords.latitude, lng=pos.coords.longitude;
+    lastPos={lat:lat,lng:lng};
+    if(map){
+      if(!meMarker){
+        var d=document.createElement('div'); d.className='me';
+        meMarker=new google.maps.marker.AdvancedMarkerElement({map:map,position:lastPos,content:d,zIndex:20});
+      }else meMarker.position=lastPos;
+      if(wantCenter){ wantCenter=false; centerMe(); }
+    }
+    if(rec) addPoint(lat,lng,pos.coords.accuracy);
+  }
+
+  function centerMe(){
+    if(map.getZoom()<16) map.setZoom(16);
+    map.panTo(lastPos);
+  }
+
+  $('btnLoc').onclick=function(){
+    if(!map)return;
+    if(!startWatch())return;
+    if(lastPos) centerMe(); else { wantCenter=true; toast('현재 위치 찾는 중…'); }
+  };
+
+  /* ---------- 이동 기록 (기록마다 다른 색) ---------- */
+  var rec=null, wake=null;
+
+  function nextColor(){
+    var used={}; tracks.forEach(function(t){used[t.color]=1});
+    for(var i=0;i<COLORS.length;i++) if(!used[COLORS[i]]) return COLORS[i];
+    return COLORS[tracks.length%COLORS.length];
+  }
+  function lockScreen(){
+    if(navigator.wakeLock) navigator.wakeLock.request('screen').then(function(w){wake=w}).catch(function(){});
+  }
+  document.addEventListener('visibilitychange',function(){
+    if(rec && document.visibilityState==='visible') lockScreen();
+  });
+
+  function addPoint(lat,lng,acc){
+    if(acc>50)return;                                  // 부정확한 위치는 버림
+    var n=rec.pts.length, last=n?rec.pts[n-1]:null;
+    if(last && dist(last[0],last[1],lat,lng)<10)return; // 10m 이상 움직였을 때만
+    rec.pts.push([+lat.toFixed(6),+lng.toFixed(6)]);
+    lines[rec.id].getPath().push(new google.maps.LatLng(lat,lng));
+    store(TRACKS,tracks);
+  }
+
+  function setRecUI(on){
+    $('btnRec').classList.toggle('on',on);
+    $('recLabel').textContent=on?'정지':'기록';
+  }
+
+  $('btnRec').onclick=function(){
+    if(!map)return;
+    if(rec){
+      var t=rec; rec=null; setRecUI(false);
+      if(wake){ wake.release().catch(function(){}); wake=null; }
+      if(t.pts.length<2){ removeTrack(t.id); toast('이동이 없어 기록을 저장하지 않았어요'); }
+      else{ store(TRACKS,tracks); toast('이동 기록 저장 ('+km(t)+')'); }
+      return;
+    }
+    if(!startWatch())return;
+    rec={id:Date.now().toString(36),start:Date.now(),color:nextColor(),pts:[]};
+    tracks.push(rec); addLine(rec); setRecUI(true); lockScreen();
+    wantCenter=!lastPos; if(lastPos) centerMe();
+    toast('이동 기록 시작 — 화면을 켜 둔 동안만 기록돼요',5000);
+  };
+
+  function removeTrack(id){
+    tracks=tracks.filter(function(t){return t.id!==id});
+    if(lines[id]){ lines[id].setMap(null); delete lines[id]; }
+    store(TRACKS,tracks);
+  }
+  function km(t){
+    var s=0; for(var i=1;i<t.pts.length;i++) s+=dist(t.pts[i-1][0],t.pts[i-1][1],t.pts[i][0],t.pts[i][1]);
+    return s<1000?Math.round(s)+'m':(s/1000).toFixed(1)+'km';
+  }
+
+  /* ---------- 저장 시트 ---------- */
+  function sheetOpen(){ return document.querySelector('.sheet.open')!==null; }
+
+  function focusPin(lat,lng){
+    if(map.getZoom()<15) map.setZoom(15);
+    map.panTo({lat:lat,lng:lng});
+    map.panBy(0,Math.round(window.innerHeight*0.22));
+  }
+
+  function setRating(r){
+    rating=r;
+    var bs=$('stars').children;
+    for(var i=0;i<bs.length;i++) bs[i].className=(i<r?'on':'');
+  }
+
+  function fillPlaceName(placeId){
+    try{
+      var pl=new google.maps.places.Place({id:placeId});
+      pl.fetchFields({fields:['displayName']}).then(function(){
+        if(editing && editing.placeId===placeId && !$('fName').value.trim() && pl.displayName){
+          $('fName').value=pl.displayName;
+        }
+      }).catch(placesErr);
+    }catch(e){}
+  }
+
+  function openNew(lat,lng,placeId,name){
+    if(!map||sheetOpen())return;
+    editing={id:null,lat:lat,lng:lng,placeId:placeId};
+    tempMarker=new google.maps.marker.AdvancedMarkerElement({
+      map:map,position:{lat:lat,lng:lng},content:pinEl(0,true),zIndex:30});
+    $('editTitle').textContent='맛집 저장';
+    $('fName').value=name||''; $('fMemo').value=''; setRating(3);
+    $('btnDelete').style.display='none';
+    $('editSheet').classList.add('open'); $('hint').classList.add('hide');
+    focusPin(lat,lng);
+    if(name){ /* 이름이 이미 있음 */ }
+    else if(placeId) fillPlaceName(placeId);
+    else setTimeout(function(){$('fName').focus()},250);
+  }
+
+  function openEdit(id){
+    if(sheetOpen())return;
+    var p=places.filter(function(x){return x.id===id})[0]; if(!p)return;
+    editing={id:id,lat:p.lat,lng:p.lng,placeId:p.placeId||null};
+    $('editTitle').textContent='맛집 수정';
+    $('fName').value=p.name; $('fMemo').value=p.memo||''; setRating(p.rating);
+    $('btnDelete').style.display='';
+    $('editSheet').classList.add('open'); $('hint').classList.add('hide');
+    focusPin(p.lat,p.lng);
+  }
+
+  function closeEdit(){
+    $('editSheet').classList.remove('open');
+    document.activeElement && document.activeElement.blur();
+    if(tempMarker){tempMarker.map=null;tempMarker=null}
+    editing=null;
+  }
+
+  function save(){
+    if(!editing)return;
+    var name=$('fName').value.trim();
+    if(!name){$('fName').focus();return}
+    var memo=$('fMemo').value.trim();
+    if(editing.id){
+      var p=places.filter(function(x){return x.id===editing.id})[0];
+      p.name=name;p.memo=memo;p.rating=rating;
+      markers[p.id].content=pinEl(rating); markers[p.id].title=name;
+    }else{
+      var np={id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),
+        lat:editing.lat,lng:editing.lng,name:name,memo:memo,rating:rating,created:Date.now()};
+      if(editing.placeId) np.placeId=editing.placeId;
+      places.push(np); addMarker(np);
+      lastPoi=null; loadPois();     // 저장한 가게는 주변 표시에서 빼기
+    }
+    if(!store(KEY,places)) alert('브라우저 저장에 실패했습니다. 저장 공간이나 시크릿 모드를 확인해 주세요.');
+    refreshCount(); closeEdit();
+  }
+
+  function remove(){
+    if(!editing||!editing.id)return;
+    if(!confirm('이 맛집을 삭제할까요?'))return;
+    var id=editing.id;
+    places=places.filter(function(x){return x.id!==id});
+    markers[id].map=null; delete markers[id];
+    store(KEY,places); refreshCount(); closeEdit();
+  }
+
+  /* ---------- 목록 ---------- */
+  function openList(){
+    if(sheetOpen())return;
+    $('results').classList.remove('show');
+    var box=$('listBody'); box.textContent='';
+    if(!places.length){
+      var e=document.createElement('div'); e.className='empty';
+      e.textContent='아직 저장한 맛집이 없어요.'; box.appendChild(e);
+    }
+    places.slice().sort(function(a,b){return b.rating-a.rating||b.created-a.created})
+      .forEach(function(p){
+        var b=document.createElement('button'); b.className='item';
+        var nm=document.createElement('span'); nm.className='nm'; nm.textContent=p.name;
+        var st=document.createElement('span'); st.className='st'; st.textContent='★'.repeat(p.rating);
+        b.appendChild(nm); b.appendChild(st);
+        if(p.memo){var mm=document.createElement('div'); mm.className='mm';
+          mm.textContent=p.memo; b.appendChild(mm);}
+        b.onclick=function(){
+          $('listSheet').classList.remove('open'); if(!map)return;
+          if(map.getZoom()<16) map.setZoom(16);
+          map.panTo({lat:p.lat,lng:p.lng});
+        };
+        box.appendChild(b);
+      });
+
+    var saved=tracks.filter(function(t){return t!==rec && t.pts.length>1});
+    if(saved.length){
+      var h=document.createElement('h3'); h.textContent='이동 기록'; box.appendChild(h);
+      saved.slice().reverse().forEach(function(t){
+        var row=document.createElement('div'); row.className='trk';
+        var sw=document.createElement('span'); sw.className='sw'; sw.style.background=t.color;
+        var tx=document.createElement('button'); tx.className='tx';
+        var d=new Date(t.start);
+        tx.textContent=(d.getMonth()+1)+'월 '+d.getDate()+'일 '+
+          ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
+        var sm=document.createElement('small'); sm.textContent=km(t); tx.appendChild(sm);
+        tx.onclick=function(){
+          $('listSheet').classList.remove('open'); if(!map)return;
+          var b=new google.maps.LatLngBounds();
+          t.pts.forEach(function(q){b.extend({lat:q[0],lng:q[1]})});
+          map.fitBounds(b,60);
+        };
+        var del=document.createElement('button'); del.className='del'; del.textContent='삭제';
+        del.onclick=function(){
+          if(!confirm('이 이동 기록을 삭제할까요?'))return;
+          removeTrack(t.id); row.remove();
+        };
+        row.appendChild(sw); row.appendChild(tx); row.appendChild(del); box.appendChild(row);
+      });
+    }
+    $('listSheet').classList.add('open'); $('hint').classList.add('hide');
+  }
+
+  /* ---------- 이벤트 ---------- */
+  for(var i=1;i<=5;i++){(function(n){
+    var b=document.createElement('button'); b.type='button'; b.textContent='★';
+    b.setAttribute('aria-label',n+'점'); b.onclick=function(){setRating(n)};
+    $('stars').appendChild(b);
+  })(i)}
+
+  $('btnSave').onclick=save;
+  $('btnCancel').onclick=closeEdit;
+  $('btnDelete').onclick=remove;
+  $('btnList').onclick=openList;
+  $('btnListClose').onclick=function(){$('listSheet').classList.remove('open')};
+
+  refreshCount();
+  hintTimer=setTimeout(function(){$('hint').classList.add('hide')},5000);
+})();
+</script>
+</body>
+</html>
