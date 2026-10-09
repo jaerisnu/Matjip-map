@@ -44,10 +44,18 @@
   .fab.rec.on i{background:#fff;border-radius:3px}
 
   .hint{position:fixed;z-index:1200;left:50%;transform:translateX(-50%);
-    bottom:calc(28px + env(safe-area-inset-bottom));background:rgba(28,27,26,.88);color:#fff;
+    bottom:calc(90px + env(safe-area-inset-bottom));background:rgba(28,27,26,.88);color:#fff;
     padding:9px 14px;border-radius:999px;font-size:13px;max-width:calc(100vw - 150px);text-align:center;
     pointer-events:none;transition:opacity .3s}
   .hint.hide{opacity:0}
+
+  /* 히트맵 범례 */
+  .legend{position:fixed;z-index:1000;left:12px;bottom:calc(24px + env(safe-area-inset-bottom));
+    background:var(--bg);border-radius:10px;padding:6px 10px;box-shadow:0 2px 10px rgba(0,0,0,.16);
+    font-size:10px;font-weight:600;color:var(--sub);pointer-events:none}
+  .legend i{display:block;width:92px;height:6px;border-radius:3px;margin-bottom:3px;
+    background:linear-gradient(90deg,#1a73e8 0 20%,#188038 20% 40%,#f9ab00 40% 60%,#f26b00 60% 80%,#d93025 80% 100%)}
+  .legend span{display:flex;justify-content:space-between}
 
   /* 내 핀 */
   .pin{width:34px;height:34px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);
@@ -132,6 +140,8 @@
   <button class="fab rec" id="btnRec" aria-label="이동 기록 시작/정지"><i></i><span id="recLabel">기록</span></button>
   <button class="fab" id="btnLoc" aria-label="현위치">📍</button>
 </div>
+
+<div class="legend"><i></i><span><b>1회</b><b>5회+</b></span></div>
 
 <div class="hint" id="hint">지도나 가게를 탭·길게 눌러 맛집 저장</div>
 
@@ -237,10 +247,62 @@
     markers[p.id]=m;
   }
 
-  function addLine(t){
-    lines[t.id]=new google.maps.Polyline({map:map,
-      path:t.pts.map(function(q){return {lat:q[0],lng:q[1]}}),
-      strokeColor:t.color,strokeWeight:5,strokeOpacity:.85,clickable:false});
+  /* 이동 경로 히트맵: 같은 길을 여러 번 지날수록 파랑→초록→노랑→주황→빨강 */
+  var HEAT=['#1a73e8','#188038','#f9ab00','#f26b00','#d93025'];
+  var heatLines=[], heatTimer=null, LAT_STEP=20/111320;   // 약 20m 격자
+
+  function cell(lat,lng){
+    var iy=Math.floor(lat/LAT_STEP);
+    var lngStep=LAT_STEP/Math.max(0.01,Math.cos(iy*LAT_STEP*Math.PI/180));
+    return iy+'_'+Math.floor(lng/lngStep);
+  }
+
+  function heatCounts(){
+    var counts={};
+    tracks.forEach(function(t){
+      var recent=[];   // GPS 흔들림으로 같은 칸을 연속 중복 집계하지 않도록
+      function visit(lat,lng){
+        var k=cell(lat,lng);
+        if(recent.indexOf(k)>=0)return;
+        counts[k]=(counts[k]||0)+1;
+        recent.push(k); if(recent.length>4) recent.shift();
+      }
+      for(var i=0;i<t.pts.length;i++){
+        var p=t.pts[i];
+        if(i){
+          var q=t.pts[i-1], d=dist(q[0],q[1],p[0],p[1]), n=Math.min(Math.ceil(d/10),200);
+          for(var j=1;j<n;j++) visit(q[0]+(p[0]-q[0])*j/n, q[1]+(p[1]-q[1])*j/n);
+        }
+        visit(p[0],p[1]);
+      }
+    });
+    return counts;
+  }
+
+  function redrawHeat(){
+    if(!map)return;
+    heatLines.forEach(function(l){l.setMap(null)}); heatLines=[];
+    var counts=heatCounts();
+    tracks.forEach(function(t){
+      var path=null, lv=-1;
+      function flush(){
+        if(path && path.length>1) heatLines.push(new google.maps.Polyline({map:map,path:path,
+          strokeColor:HEAT[lv],strokeWeight:5,strokeOpacity:.9,clickable:false,zIndex:lv}));
+      }
+      for(var i=1;i<t.pts.length;i++){
+        var a=t.pts[i-1], b=t.pts[i];
+        var c=counts[cell((a[0]+b[0])/2,(a[1]+b[1])/2)]||1;
+        var l=Math.min(c,5)-1;
+        if(l!==lv){ flush(); lv=l; path=[{lat:a[0],lng:a[1]}]; }
+        path.push({lat:b[0],lng:b[1]});
+      }
+      flush();
+    });
+  }
+
+  function scheduleHeat(){
+    if(heatTimer)return;
+    heatTimer=setTimeout(function(){heatTimer=null;redrawHeat()},3000);
   }
 
   function initMap(){
@@ -276,7 +338,7 @@
     });
     ['mouseup','dragstart','zoom_changed'].forEach(function(ev){ map.addListener(ev,cancelLP); });
 
-    tracks.forEach(addLine);
+    redrawHeat();
     places.forEach(addMarker);
     if(!view && places.length){
       var b=new google.maps.LatLngBounds();
@@ -400,7 +462,7 @@
     if(lastPos) centerMe(); else { wantCenter=true; toast('현재 위치 찾는 중…'); }
   };
 
-  /* ---------- 이동 기록 (기록마다 다른 색) ---------- */
+  /* ---------- 이동 기록 ---------- */
   var rec=null, wake=null;
 
   function nextColor(){
@@ -420,8 +482,8 @@
     var n=rec.pts.length, last=n?rec.pts[n-1]:null;
     if(last && dist(last[0],last[1],lat,lng)<10)return; // 10m 이상 움직였을 때만
     rec.pts.push([+lat.toFixed(6),+lng.toFixed(6)]);
-    lines[rec.id].getPath().push(new google.maps.LatLng(lat,lng));
     store(TRACKS,tracks);
+    scheduleHeat();
   }
 
   function setRecUI(on){
@@ -435,20 +497,20 @@
       var t=rec; rec=null; setRecUI(false);
       if(wake){ wake.release().catch(function(){}); wake=null; }
       if(t.pts.length<2){ removeTrack(t.id); toast('이동이 없어 기록을 저장하지 않았어요'); }
-      else{ store(TRACKS,tracks); toast('이동 기록 저장 ('+km(t)+')'); }
+      else{ store(TRACKS,tracks); redrawHeat(); toast('이동 기록 저장 ('+km(t)+')'); }
       return;
     }
     if(!startWatch())return;
     rec={id:Date.now().toString(36),start:Date.now(),color:nextColor(),pts:[]};
-    tracks.push(rec); addLine(rec); setRecUI(true); lockScreen();
+    tracks.push(rec); setRecUI(true); lockScreen();
     wantCenter=!lastPos; if(lastPos) centerMe();
     toast('이동 기록 시작 — 화면을 켜 둔 동안만 기록돼요',5000);
   };
 
   function removeTrack(id){
     tracks=tracks.filter(function(t){return t.id!==id});
-    if(lines[id]){ lines[id].setMap(null); delete lines[id]; }
     store(TRACKS,tracks);
+    redrawHeat();
   }
   function km(t){
     var s=0; for(var i=1;i<t.pts.length;i++) s+=dist(t.pts[i-1][0],t.pts[i-1][1],t.pts[i][0],t.pts[i][1]);
@@ -573,7 +635,6 @@
       var h=document.createElement('h3'); h.textContent='이동 기록'; box.appendChild(h);
       saved.slice().reverse().forEach(function(t){
         var row=document.createElement('div'); row.className='trk';
-        var sw=document.createElement('span'); sw.className='sw'; sw.style.background=t.color;
         var tx=document.createElement('button'); tx.className='tx';
         var d=new Date(t.start);
         tx.textContent=(d.getMonth()+1)+'월 '+d.getDate()+'일 '+
@@ -590,7 +651,7 @@
           if(!confirm('이 이동 기록을 삭제할까요?'))return;
           removeTrack(t.id); row.remove();
         };
-        row.appendChild(sw); row.appendChild(tx); row.appendChild(del); box.appendChild(row);
+        row.appendChild(tx); row.appendChild(del); box.appendChild(row);
       });
     }
     $('listSheet').classList.add('open'); $('hint').classList.add('hide');
